@@ -1,0 +1,275 @@
+"""
+Welcome to our PlowPal launch page for KingHack 2026!
+To run the page, use the command: streamlit run PlowPal.py and to stop it, Ctrl + C.
+Once launched you should find instructions on how to use the page in the sidebar.
+"""
+
+import streamlit as st
+import requests
+from datetime import datetime
+
+# PAGE SETUP SECTION
+st.set_page_config(
+    page_title="PlowPal - Snow Clearing Priority Visualizer",
+    page_icon="❄️",
+    layout="wide"
+)
+
+# Title at the top of the page
+st.title("❄️ PlowPal - Snow Clearing Priority Visualizer")
+st.markdown("**Kingston Mayor's Municipal Stream Challenge**")
+st.markdown("---")
+
+
+# SIDEBAR SECTION - User inputs and information
+with st.sidebar:
+    st.header("⚙️ Layout Settings")
+    
+    # Ask the user for their API key
+    api_key = st.text_input(
+        "Want to check your area's snow clearing priority? (OpenWeather API Key)",
+        type="password",
+        help="Need an API key? Get one for free from https://openweathermap.org/api"
+    )
+    # fun Kingston location information
+    st.markdown("---")
+    st.markdown("### 🌎 Location")
+    st.write("**Kingston, ON**")
+    st.write("Latitude: 44.23")
+    st.write("Longitude: -76.48")
+    
+    st.markdown("---")
+    st.markdown("### How We Decide When to Dispatch Snow Plows")
+    st.write("**Plows are out** if:")
+    st.write("• Snow on the ground is more than 2cm")
+    st.write("• OR (Temperature is below 0°C AND Snow on the ground is more than 0cm)")
+    st.write("")
+    st.write("**Otherwise, Plows are kept in**")
+
+# FUNCTIONS SECTION - All the code blocks
+def check_plow_status(snow_cm, temp_celsius):
+    """
+    This function decides if plows should be out based on snow and temperature.
+    Returns "OUT" if plows should be active, "NOT_OUT" if they should stay in.
+    """
+    # Criteria 1: If snow is more than 2cm, plows are out
+    if snow_cm > 2:
+        return "OUT"
+    
+    # Criteria 2: If it's below freezing (0°C) AND there's any snow, plows are out
+    elif temp_celsius < 0 and snow_cm > 0:
+        return "OUT"
+    
+    # Otherwise, plows stay in
+    else:
+        return "NOT_OUT"
+
+
+def fetch_weather(lat, lon, api_key):
+    """
+    This function gets weather data from the OpenWeather API.
+    Returns the weather data if successful, or an error message if something went wrong.
+    """
+    # Check if user entered an API key
+    if api_key is None:
+        return None, "Please enter your OpenWeather API key in the sidebar. Need an API key? Get one for free from https://openweathermap.org/api"
+    
+    # Remove extra spaces from the API key if necessary
+    api_key_clean = str(api_key).strip()
+    
+    # Check if API key is empty 
+    if api_key_clean == "" or api_key_clean == "None":
+        return None, "Please enter your OpenWeather API key in the sidebar. Need an API key? Get one for free from https://openweathermap.org/api"
+    
+    try:
+        # The API request
+        url = "https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key_clean,
+            "units": "metric"  # Get temperature in Celsius
+        }
+        
+        # Make the request to the API
+        response = requests.get(url, params=params, timeout=10)
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Return the weather data if successful
+            weather_data = response.json()
+            return weather_data, None
+        elif response.status_code == 401:
+            return None, "Invalid API key. Please check your OpenWeather API key in the sidebar."
+        elif response.status_code == 429:
+            return None, "API rate limit exceeded. Please try again later."
+        else:
+            # Get a more detailed error message if needed
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("message", f"Status code: {response.status_code}")
+            except:
+                error_msg = f"Status code: {response.status_code}"
+            return None, f"Error fetching weather data: {error_msg}"
+    
+    except requests.exceptions.Timeout:
+        return None, "Request timed out. Please check your internet connection."
+    except requests.exceptions.ConnectionError:
+        return None, "Connection error. Please check your internet connection."
+    except Exception as e:
+        return None, f"Error: {str(e)}"
+
+
+# MAIN PAGE CONTENT
+
+
+col1, col2 = st.columns([2, 1])
+
+# Main weather display
+with col1:
+    st.header("🌨️ Current Weather Conditions")
+    
+    # Check if user clicked the refresh button
+    refresh_button = st.button("🔄 Refresh Weather Data", type="primary")
+    
+    # Fetch weather data
+    if refresh_button or 'weather_data' not in st.session_state:
+        with st.spinner("Fetching weather data..."):
+            weather_data, error = fetch_weather(44.23, -76.48, api_key)
+            
+            # If we got data successfully, save it
+            if not error:
+                st.session_state.weather_data = weather_data
+    else:
+        # Use the data we already have
+        weather_data = st.session_state.weather_data
+        error = None
+    
+    # Show error message if something went wrong
+    if error:
+        st.error(f"❌ {error}")
+        if "API key" in error:
+            st.info("💡 Get a free API key at https://openweathermap.org/api, then paste it in the sidebar.")
+    
+    # If we have weather data, display it
+    elif weather_data:
+            # Extract temperature from the weather data
+            temp = weather_data.get("main", {}).get("temp", 0)
+            
+            # Extract snow data from the weather data
+            snow_data = weather_data.get("snow", {})
+            
+            # Handle different formats of snow data
+            if isinstance(snow_data, dict):
+                # If snow_data is a dictionary, get the "3h" value (snow in last 3 hours)
+                snow_3h_mm = snow_data.get("3h", 0)
+            else:
+                # If snow_data is just a number, use that
+                snow_3h_mm = float(snow_data) if snow_data else 0
+            
+            # Convert from millimeters to centimeters
+            snow_cm = snow_3h_mm / 10
+            
+            # Display temperature and snow in two columns
+            metric_col1, metric_col2 = st.columns(2)
+            
+            with metric_col1:
+                st.metric("🌡️ Temperature", f"{temp:.1f}°C")
+            
+            with metric_col2:
+                st.metric("❄️ Snow (3h)", f"{snow_cm:.2f} cm")
+            
+            # Check if plows should be out
+            plow_status = check_plow_status(snow_cm, temp)
+            
+            # Show plow status
+            st.markdown("---")
+            st.header("🚛 Plow Status")
+            
+            if plow_status == "OUT":
+                # if plows are out, show green box
+                st.markdown(
+                    """
+                    <div style="text-align: center; padding: 40px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+                    border-radius: 20px; margin: 20px 0;">
+                        <h1 style="color: white; font-size: 80px; margin: 0;">✅ OUT</h1>
+                        <p style="color: white; font-size: 24px; margin-top: 20px;">Plows are Active</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.success("🚛 **Plows are out** based on current weather conditions.")
+                
+            else:
+                # if plows are not out, show red box
+                st.markdown(
+                    """
+                    <div style="text-align: center; padding: 40px; background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%); 
+                    border-radius: 20px; margin: 20px 0;">
+                        <h1 style="color: white; font-size: 80px; margin: 0;">❌ NOT OUT</h1>
+                        <p style="color: white; font-size: 24px; margin-top: 20px;">Plows are Inactive</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.info("ℹ️ **Plows are not out** - current conditions don't require snow clearing.")
+            
+            # Explain why plows are out or not
+            st.markdown("### 📝 Why?")
+            if plow_status == "OUT":
+                if snow_cm > 2:
+                    st.write(f"✅ Snow accumulation ({snow_cm:.2f} cm) exceeds the 2 cm threshold.")
+                elif temp < 0 and snow_cm > 0:
+                    st.write(f"✅ Temperature ({temp:.1f}°C) is below freezing and snow is present ({snow_cm:.2f} cm).")
+            else:
+                st.write(f"ℹ️ Current conditions: {snow_cm:.2f} cm of snow and {temp:.1f}°C.")
+                if snow_cm <= 2 and temp >= 0:
+                    st.write("   - Snow is below 2 cm and temperature is above freezing.")
+                elif snow_cm == 0:
+                    st.write("   - No snow accumulation detected.")
+            
+            # Show when the data was last updated
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            st.caption(f"Last updated: {current_time}")
+    
+    # If no API key and no error shown yet, show more instructions
+    elif not api_key or not api_key.strip():
+        st.markdown("""
+        ### How to get an API key:
+        1. Visit [OpenWeatherMap](https://openweathermap.org/api)
+        2. Sign up for a free account
+        3. Navigate to API keys section
+        4. Copy your API key and paste it in the sidebar
+        """)
+
+# Information panel on the right (Decision chart)
+with col2:
+    st.header("Our Decision Criteria")
+    st.markdown("""
+    | Snow (cm) | Temp (°C) | Decision         |
+    |-----------|-----------|------------------|
+    | > 2       | Any       | ✅ Necessary     |
+    | > 0       | < 0       | ✅ Necessary     |
+    | ≤ 2       | ≥ 0       | ❌ Not Necessary |
+    | 0         | Any       | ❌ Not Necessary |
+    """)
+    
+    st.markdown("---")
+    st.markdown("### 🎯 About")
+    st.markdown("""
+    **PlowPal** helps Kingston's residents understand when snow plows are dispatched and why.
+    
+    This tool uses real-time weather data to show snow plow dispatch status and priorities.
+    """)
+
+# FOOTER OF THE PAGE
+
+
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: #666;'>"
+    "❄️ PlowPal - Kingston Mayor's Municipal Stream Challenge | "
+    "Built with Streamlit, Cursor & OpenWeather API"
+    "</div>",
+    unsafe_allow_html=True
+)
